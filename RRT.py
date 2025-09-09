@@ -1,33 +1,19 @@
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 
-def planning_domain():
-    x = 100 * np.random.rand()
-    y = 100 * np.random.rand()
-    return x, y
+def planning_domain(bounds=(0,100,0,100)):
+    xmin, xmax, ymin, ymax = bounds
+    return (np.random.uniform(xmin, xmax),
+            np.random.uniform(ymin, ymax))
 
 def steer(from_node, to_node, step_size=1.0):
     fx, fy = from_node
     tx, ty = to_node
     dx, dy = tx - fx, ty - fy
     dist = np.hypot(dx, dy)
-    
-    new_x = fx + (dx / dist) * step_size
-    new_y = fy + (dy / dist) * step_size
-    return new_x, new_y
-
-def rrt(K, step_size=1.0, start=(50,50)):
-    nodes = [start]
-    parents = [-1]
-    for _ in range(K):
-        q_rand = planning_domain()
-        idx_near = nearest_index(nodes, q_rand)
-        q_new = steer(nodes[idx_near], q_rand, step_size)
-        nodes.append(q_new)
-        parents.append(idx_near)
-    return nodes, parents
-
+    if dist == 0:
+        return from_node
+    return (fx + (dx/dist) * step_size, fy + (dy/dist) * step_size)
 
 def nearest_index(nodes, point):
     xs = np.array([n[0] for n in nodes])
@@ -36,25 +22,75 @@ def nearest_index(nodes, point):
     d2 = (xs - px)**2 + (ys - py)**2
     return int(np.argmin(d2))
 
-    
+def create_obstacles(num_obstacles, bounds=(0,100,0,100), r_range=(5,15), avoid_points=()):
+    xmin, xmax, ymin, ymax = bounds
+    obstacles = []
+    for _ in range(num_obstacles):
+        r = np.random.uniform(*r_range)
+        while True:
+            cx = np.random.uniform(xmin, xmax)
+            cy = np.random.uniform(ymin, ymax)
+            ok = True
+            for p in avoid_points:
+                if (cx - p[0])**2 + (cy - p[1])**2 <= r*r:
+                    ok = False
+                    break
+            if ok:
+                break
+        obstacles.append(((cx, cy), r))
+    return obstacles
+
+def point_in_any_circle(p, obstacles):
+    px, py = p
+    for (cx, cy), r in obstacles:
+        if (px - cx)**2 + (py - cy)**2 <= r*r:
+            return True
+    return False
+
+def rrt(K, step_size=1.0, num_obstacles=6, start=(50,50),
+        bounds=(0,100,0,100), r_range=(5,15)):
+    nodes = [start]
+    parents = [-1]
+    obstacles = create_obstacles(num_obstacles, bounds, r_range, avoid_points=[start])
+    if point_in_any_circle(start, obstacles):
+        raise ValueError("start inside obstacle")
+    accepted = 0
+    xmin, xmax, ymin, ymax = bounds
+    while accepted < K:
+        q_rand = planning_domain(bounds)
+        if point_in_any_circle(q_rand, obstacles):
+            continue
+        i_near = nearest_index(nodes, q_rand)
+        q_new = steer(nodes[i_near], q_rand, step_size)
+        q_new = (np.clip(q_new[0], xmin, xmax),
+                 np.clip(q_new[1], ymin, ymax))
+        if point_in_any_circle(q_new, obstacles):
+            continue
+        nodes.append(q_new)
+        parents.append(i_near)
+        accepted += 1
+    return nodes, parents, obstacles
 
 if __name__ == "__main__":
-    nodes, parents = rrt(K=2000, step_size=1.0)
+    #make start random
+    
 
-    # draw tree
+    nodes, parents, obstacles = rrt(K=1000, step_size=1.0, num_obstacles=8, start=(15,10))
+    for (cx, cy), r in obstacles:
+        circle = plt.Circle((cx, cy), r, color='r', alpha=0.5)
+        plt.gca().add_artist(circle)
+
     for i in range(1, len(nodes)):
         p = parents[i]
         x1, y1 = nodes[p]
         x2, y2 = nodes[i]
-        plt.plot([x1, x2], [y1, y2], '-', linewidth=0.8)
-
+        plt.plot([x1, x2], [y1, y2], '-', linewidth=0.6)
     xs = [x for x, _ in nodes]
     ys = [y for _, y in nodes]
-    #circle1 = plt.Circle((50, 50), 20, color='r')
-
-    #plt.gca().add_patch(circle1)
     plt.scatter(xs, ys, s=10)
-    plt.xlim(0, 100); plt.ylim(0, 100)
-    plt.title("RRT (step=1)")
-    plt.xlabel("X"); plt.ylabel("Y")
+    plt.scatter([nodes[0][0]], [nodes[0][1]], s=50, marker='o')
+    plt.gca().set_aspect('equal', 'box')
+    plt.xlim(0,100); plt.ylim(0,100)
+    plt.title("RRT with circular obstacles")
+    plt.legend()
     plt.show()
